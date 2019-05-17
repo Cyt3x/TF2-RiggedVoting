@@ -11,37 +11,30 @@
 #include <tf2_stocks>
 #include <sdkhooks>
 
+#pragma newdecls required
+
 public Plugin myinfo = 
 {
 	name = "[TF2] Rigged Voting", 
 	author = PLUGIN_AUTHOR, 
-	description = "Let's users' choose which vote options win",
+	description = "Let's users' choose which vote option wins",
 	version = PLUGIN_VERSION, 
 	url = "https://steamcommunity.com/id/cyt3xx/"
 };
 
-#define VOTE_NAME	0
-#define VOTE_AUTHID	1
-#define	VOTE_IP		2
+Menu g_hVoteMenu = null;	// Vote Menu
+char g_voteArg[256];		// Used to hold vote questions
 
-#define VOTE_YES "###yes###"
-#define VOTE_NO "###no###"
-
-Menu g_hVoteMenu = null;
-char g_voteArg[256];	/* Used to hold vote questions */
-
-int g_iWinner;
-char g_sWinnerString[256];
+int g_iWinner;				// Winning Option Integer
+char g_sWinnerString[256];	// Winning Option String
 
 public void OnPluginStart()
 {
-	RegAdminCmd("sm_rvote", Command_Vote, ADMFLAG_ROOT, "[SM] Usage: sm_rvote <question> [Ans1] [Ans2]...[Ans5] <winning option>");
-	//RegAdminCmd("sm_winner", Command_Winner, 0, "[SM]");
+	RegAdminCmd("sm_rvote", Command_Vote, ADMFLAG_KICK, "[SM] Usage: sm_rvote <Question> [Ans1] [Ans2]...[Ans5] <Winning option>");
 	
 	LoadTranslations("common.phrases");
 	LoadTranslations("basevotes.phrases");
 	LoadTranslations("plugin.basecommands");
-	LoadTranslations("basebans.phrases");
 	
 	AutoExecConfig(true, "basevotes");
 }
@@ -50,48 +43,57 @@ public Action Command_Vote(int client, int args)
 {
 	if (args < 1)
 	{
-		ReplyToCommand(client, "[SM] Usage: sm_rvote <question> [Ans1] [Ans2]...[Ans5] <winning option>");
+		ReplyToCommand(client, "[SM] Usage: sm_rvote <Question> [Ans1] [Ans2]...[Ans5] <Winning option>");
 		return Plugin_Handled;
 	}
-	
+	if (args > 7)
+	{
+		ReplyToCommand(client, "[SM] Usage: sm_rvote <Question> [Ans1] [Ans2]...[Ans5] <Winning option>");
+		return Plugin_Handled;
+	}	
 	if (IsVoteInProgress())
 	{
 		ReplyToCommand(client, "[SM] %t", "Vote in Progress");
 		return Plugin_Handled;
 	}
-
 	if (!TestVoteDelay(client))
 	{
 		return Plugin_Handled;
 	}
 	
-	char winnerNum[2];
+	char winnerNum[2];		// Convert winning option to int from string
 	GetCmdArg(args, winnerNum, sizeof(winnerNum));
 	g_iWinner = StringToInt(winnerNum);
-
-	char question[256];
+	
+	char question[256];		// Save question string to g_voteArg
 	GetCmdArg(1, question, sizeof(question));
 	g_voteArg = question;
 	
-	g_hVoteMenu = new Menu(Handler_VoteCallback, MENU_ACTIONS_ALL);
+	g_hVoteMenu = new Menu(Handler_VoteCallback, MENU_ACTIONS_ALL);		// Set title for the vote menu
 	g_hVoteMenu.SetTitle("%s?", g_voteArg);	
 	
 	char answers[5][64];
 	int answerCount = args - 2;
 	
-	for (int i = 2; i < args; i++) 
+	if (g_iWinner > answerCount)	// Check if winning option's number is too large
+	{
+		ReplyToCommand(client, "[SM] Usage: sm_rvote <Question> [Ans1] [Ans2]...[Ans5] <Winning option>");
+		return Plugin_Handled;	
+	}
+	
+	for (int i = 2; i < args; i++) 		// Store options into answers array
 	{
 		GetCmdArg(i, answers[i - 2], 64);
 	}
-	for (int i = 0; i < answerCount; i++)
+	for (int i = 0; i < answerCount; i++)		// Adds options to voting menu
 	{
 		g_hVoteMenu.AddItem(answers[i], answers[i]);
 	}	
 
-	g_hVoteMenu.ExitButton = false;
+	g_hVoteMenu.ExitButton = false;		// Hide the exit vote button and start the vote with 15 seconds until vote ends
 	g_hVoteMenu.DisplayVoteToAll(15);		
 	
-	g_sWinnerString = answers[g_iWinner - 1];
+	g_sWinnerString = answers[g_iWinner - 1];		// Store winning option into g_sWinnerString
 	
 	return Plugin_Handled;	
 }
@@ -111,14 +113,6 @@ public int Handler_VoteCallback(Menu menu, MenuAction action, int param1, int pa
 	{
 		char display[64];
 		menu.GetItem(param2, "", 0, _, display, sizeof(display));
-	 
-	 	if (strcmp(display, "No") == 0 || strcmp(display, "Yes") == 0)
-	 	{
-			char buffer[255];
-			Format(buffer, sizeof(buffer), "%T", display, param1);
-
-			return RedrawMenuItem(buffer);
-		}
 	}
 	else if (action == MenuAction_VoteCancel && param1 == VoteCancel_NoVotes)
 	{
@@ -127,39 +121,16 @@ public int Handler_VoteCallback(Menu menu, MenuAction action, int param1, int pa
 	else if (action == MenuAction_VoteEnd)
 	{
 		char item[64], display[64];
-		float percent, limit;
+		float percent;
 		int votes, totalVotes;
 
 		GetMenuVoteInfo(param2, votes, totalVotes);
 		menu.GetItem(param1, item, sizeof(item), _, display, sizeof(display));
 		
-		if (strcmp(item, VOTE_NO) == 0 && param1 == 1)
-		{
-			votes = totalVotes - votes; // Reverse the votes to be in relation to the Yes option.
-		}
-		
 		percent = GetVotePercent(votes, totalVotes);
 
-		//limit = g_Cvar_Limits[g_voteType].FloatValue;
-		
-		// A multi-argument vote is "always successful", but have to check if its a Yes/No vote.
-		if ((strcmp(item, VOTE_YES) == 0 && FloatCompare(percent,limit) < 0 && param1 == 0) || (strcmp(item, VOTE_NO) == 0 && param1 == 1))
-		{
-			/* :TODO: g_voteTarget should be used here and set to -1 if not applicable.
-			 */
-			LogAction(-1, -1, "Vote failed.");
-			PrintToChatAll("[SM] %t", "Vote Failed", RoundToNearest(100.0*limit), RoundToNearest(100.0*percent), totalVotes);
-		}
-		else
-		{
-			PrintToChatAll("[SM] %t", "Vote Successful", RoundToNearest(100.0*percent), totalVotes);
-			if (strcmp(item, VOTE_NO) == 0 || strcmp(item, VOTE_YES) == 0)
-			{
-				strcopy(item, sizeof(item), display);
-			}
-			
-			PrintToChatAll("[SM] %t", "Vote End", g_voteArg, g_sWinnerString);		
-		}
+		PrintToChatAll("[SM] %t", "Vote Successful", RoundToNearest(100.0*percent), totalVotes);
+		PrintToChatAll("[SM] %t", "Vote End", g_voteArg, g_sWinnerString);		
 	}
 	
 	return 0;
