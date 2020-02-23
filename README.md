@@ -1,5 +1,5 @@
 # TF2-RiggedVoting
-As the name suggests, lets you control the winning option.
+As the name suggests, lets you control the winning option
 ---------------------------------------------------------------
 Usage: sm_rvote <question> [Ans1] [Ans2]....[Ans5] <Winning Option>
 Example: "sm_rvote test A B C D E 3"
